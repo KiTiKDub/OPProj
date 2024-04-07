@@ -58,9 +58,6 @@ public:
 
 private:
 
-    float rmsValue{ 0 };
-    float nextValue{ 0 };
-
     std::array<juce::dsp::IIR::Filter<float>, 64> allpasses;
 
     juce::dsp::BallisticsFilter<float> balistic;

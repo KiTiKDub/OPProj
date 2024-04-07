@@ -170,24 +170,26 @@ void OddProphProjAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     auto cutoffMod = lfoDepth->get() * sineValue;
     */
 
-    auto block = juce::dsp::AudioBlock<float>(buffer);
     //auto leftBlock = block.getSingleChannelBlock(0);
     //auto rightBlock = block.getSingleChannelBlock(1);
     //auto leftContext = juce::dsp::ProcessContextReplacing<float>(leftBlock);
     //auto rightContext = juce::dsp::ProcessContextReplacing<float>(rightBlock);
 
-    //get rmsValue
-    rmsValue = 0;
+    ////get rmsValue
+    //rmsValue = 0;
 
-    for (int i = 0; i < totalNumInputChannels; i++)
-    {
-        rmsValue += juce::Decibels::gainToDecibels(buffer.getRMSLevel(i, 0, buffer.getNumSamples()));
-    }
+    //for (int i = 0; i < totalNumInputChannels; i++)
+    //{
+    //    auto check = buffer.getRMSLevel(i, 0, buffer.getNumSamples());
+    //    rmsValue += juce::Decibels::gainToDecibels(buffer.getRMSLevel(i, 0, buffer.getNumSamples()));
+    //}
 
-    if (rmsValue < -120) { rmsValue = -120; }
+    //if (rmsValue < -120) { rmsValue = -120; }
 
-    //Modulation total
-    auto afTotal = rmsValue/totalNumInputChannels + afGain->get();
+    ////Modulation total
+    //auto afTotal = rmsValue/totalNumInputChannels + afGain->get();
+
+    auto block = juce::dsp::AudioBlock<float>(buffer);
 
     //process attack and release times
     balistic.setAttackTime(attack->get());
@@ -199,17 +201,19 @@ void OddProphProjAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
     for (int i = 0; i < buffer.getNumSamples(); i++)
     {
-        nextValue = balistic.processSample(0, afTotal); 
-        auto freqAdjusted = juce::jmap(nextValue, -24.f, 30.f, 0.f, 200.f);
-
-        auto nextCutoff = grabCutoff + freqAdjusted;
-        if (nextCutoff < 1) { nextCutoff = 1; }
-
-        auto filterCoe = juce::dsp::IIR::Coefficients<float>::makeAllPass(getSampleRate(), nextCutoff);
         float leftSample = block.getSample(0, i);
         float rightSample = block.getSample(1, i);
 
-        for (int filter = 0; filter < allpasses.size(); filter += 2)
+        auto nextValue = balistic.processSample(0, leftSample); //will probalby need to figure out a multi channel way to do this if things get weird
+        auto bufferOutput = juce::Decibels::gainToDecibels(nextValue, -60.f);
+        auto freqAdjusted = juce::jmap(bufferOutput + afGain->get(), -60.f, 30.f, 0.f, 200.f);
+
+        auto nextCutoff = grabCutoff + std::floorf(freqAdjusted);
+        if (nextCutoff < 1) { nextCutoff = 1; }
+
+        auto filterCoe = juce::dsp::IIR::Coefficients<float>::makeAllPass(getSampleRate(), nextCutoff);
+
+        for (int filter = 0; filter < 2; filter += 2)
         {
             allpasses[filter].coefficients = filterCoe;
             allpasses[filter + 1].coefficients = filterCoe;
