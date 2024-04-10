@@ -56,7 +56,11 @@ public:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
     juce::AudioProcessorValueTreeState apvts{ *this, nullptr, "parameters", createParameterLayout() };
 
+    std::atomic<float> nextCutoff;
 private:
+
+    juce::dsp::Gain<float> gain;
+    juce::dsp::Compressor<float> compressor;
 
     std::array<juce::dsp::IIR::Filter<float>, 64> allpasses;
 
@@ -67,6 +71,10 @@ private:
     juce::AudioParameterFloat* modAmount{ nullptr };
     juce::AudioParameterFloat* attack{ nullptr };
     juce::AudioParameterFloat* release{ nullptr };
+
+
+    //Need to add modulation into scheme
+    //Test to see if it does dope things
 
     //==============================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (OddProphProjAudioProcessor)

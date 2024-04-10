@@ -33,6 +33,9 @@ OddProphProjAudioProcessorEditor::OddProphProjAudioProcessorEditor (OddProphProj
     addAndMakeVisible(attack);
     addAndMakeVisible(release);
 
+   /* addAndMakeVisible(displayCutoff);
+    displayCutoff.setSize(50, 50);*/
+
     setSize (400, 400);
 }
 
@@ -90,4 +93,13 @@ void OddProphProjAudioProcessorEditor::resized()
     modAmount.setBounds(modArea);
     attack.setBounds(attackArea);
     release.setBounds(relArea);
+
+    displayCutoff.setBounds(freqArea);
+}
+
+void OddProphProjAudioProcessorEditor::timerCallback()
+{
+    cutoffValue = audioProcessor.nextCutoff;
+    displayCutoff.setName((juce::String)cutoffValue);
+    displayCutoff.repaint();
 }

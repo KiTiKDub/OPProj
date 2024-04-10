@@ -14,7 +14,7 @@
 //==============================================================================
 /**
 */
-class OddProphProjAudioProcessorEditor  : public juce::AudioProcessorEditor
+class OddProphProjAudioProcessorEditor  : public juce::AudioProcessorEditor, juce::Timer
 {
 public:
     OddProphProjAudioProcessorEditor (OddProphProjAudioProcessor&);
@@ -23,6 +23,7 @@ public:
     //==============================================================================
     void paint (juce::Graphics&) override;
     void resized() override;
+    void timerCallback() override;
 
 private:
     // This reference is provided as a quick way for your editor to
@@ -32,6 +33,10 @@ private:
     juce::Slider cutoffFreq, afGain, modAmount, attack, release;
 
     juce::AudioProcessorValueTreeState::SliderAttachment cutoffFreqAT, afGainAT, modAmountAT, attackAT, releaseAT;
+
+    juce::Component displayCutoff;
+
+    float cutoffValue;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (OddProphProjAudioProcessorEditor)
 };
