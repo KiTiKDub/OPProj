@@ -235,16 +235,31 @@ void OddProphProjAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     //    }
     //}
 
+    float newRms = 0;
+
+    for (int ch = 0; ch < totalNumInputChannels; ch++)
+    {
+        newRms += buffer.getRMSLevel(ch, 0, buffer.getNumSamples());
+    }
+
+    newRms /= 2;
+    newRms = juce::Decibels::gainToDecibels(newRms, -72.f);
+
+    auto followerDB = newRms + grabGain;
+
     for (int ch = 0; ch < totalNumInputChannels; ch++)
     {
         auto* data = block.getChannelPointer(ch);
-        auto rmsGain = buffer.getRMSLevel(ch, 0, buffer.getNumSamples());
-        auto rms = juce::Decibels::gainToDecibels(rmsGain, -72.f);
-        auto freqAdjusted = juce::jmap(grabGain + rms, -72.f, 24.f, -100.f, 100.f);
+        //auto rmsGain = buffer.getRMSLevel(ch, 0, buffer.getNumSamples());
+        //auto rms = juce::Decibels::gainToDecibels(rmsGain, -72.f);
 
         for (int s = 0; s < buffer.getNumSamples(); s++)
         {
             float sample = data[s];
+
+            auto nextFollowerValue = balistic.processSample(ch, juce::Decibels::decibelsToGain(followerDB, -72.f));
+
+            auto freqAdjusted = juce::jmap(nextFollowerValue, 0.f, 1.f, 0.f, 1000.f);
 
             nextCutoff = grabCutoff + (std::floorf(freqAdjusted) * modAmount->get());
 
