@@ -56,13 +56,11 @@ public:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
     juce::AudioProcessorValueTreeState apvts{ *this, nullptr, "parameters", createParameterLayout() };
 
-    std::atomic<float> nextCutoff;
+    float nextCutoff;
 private:
 
-    juce::dsp::Gain<float> gain;
-    juce::dsp::Compressor<float> compressor;
-
-    std::array<juce::dsp::IIR::Filter<float>, 64> allpasses;
+    //std::array<juce::dsp::IIR::Filter<float>, 64> allpasses;
+    std::array<juce::dsp::FirstOrderTPTFilter<float>, 64> allpasses;
 
     juce::dsp::BallisticsFilter<float> balistic;
 

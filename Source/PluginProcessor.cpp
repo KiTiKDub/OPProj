@@ -108,13 +108,8 @@ void OddProphProjAudioProcessor::prepareToPlay (double sampleRate, int samplesPe
     {
         all.reset();
         all.prepare(spec);
+        all.setType(juce::dsp::FirstOrderTPTFilterType::allpass);   
     }
-
-    gain.prepare(spec);
-    gain.setRampDurationSeconds(.05);
-    compressor.prepare(spec);
-    compressor.setThreshold(-.5f);
-    compressor.setRatio(100);
 
     balistic.prepare(spec);
     balistic.setLevelCalculationType(juce::dsp::BallisticsFilterLevelCalculationType::RMS);
@@ -196,60 +191,86 @@ void OddProphProjAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     //auto afTotal = rmsValue/totalNumInputChannels + afGain->get();
 
     auto block = juce::dsp::AudioBlock<float>(buffer);
-    auto context = juce::dsp::ProcessContextReplacing<float>(block);
 
     //process attack and release times
     balistic.setAttackTime(attack->get());
     balistic.setReleaseTime(release->get());
 
-    compressor.setAttack(attack->get());
-    compressor.setRelease(release->get());
-
     auto grabCutoff = cutoffFreq->get();
+    auto grabGain = afGain->get();
 
-    auto leftChannel = block.getChannelPointer(0);
-    auto rightChannel = block.getChannelPointer(1);
+    //for (int ch = 0; ch < totalNumInputChannels; ch++)
+    //{
+    //    auto* data = block.getChannelPointer(ch);
+    //    auto rmsGain = buffer.getRMSLevel(ch, 0, buffer.getNumSamples());
+    //    auto rms = juce::Decibels::gainToDecibels(rmsGain, -72.f);
 
-    auto rmsLeft = juce::Decibels::gainToDecibels(buffer.getRMSLevel(0, 0, buffer.getNumSamples())); //This looks crazy but doesn't seem to break anything
-    auto rmsRight = juce::Decibels::gainToDecibels(buffer.getRMSLevel(1, 0, buffer.getNumSamples()));
-    auto rms = (rmsLeft + rmsRight) / 2;
+    //    for (int s = 0; s < buffer.getNumSamples(); s++)
+    //    {
+    //        float sample = data[s];
 
-    //RMS stuff sounds OK, idk why the eq is so weird. But forget trying to copy, lets just make our own cool shit
+    //        auto freqAdjusted = juce::jmap(afGain->get() + rms, -72.f, 24.f, 0.f, 10000.f);
 
-    for (int i = 0; i < buffer.getNumSamples(); i++)
+    //        nextCutoff = grabCutoff + (std::floorf(freqAdjusted) * modAmount->get());
+
+    //        for (int filter = 0; filter < allpasses.size()/*JUCE_LIVE_CONSTANT(2)*/; filter++)
+    //        {
+    //            allpasses[filter].setCutoffFrequency(nextCutoff);
+    //            sample = allpasses[filter].processSample(ch, sample);    
+    //        }
+
+    //        auto sampleDb = juce::Decibels::gainToDecibels(sample) + afGain->get();
+
+    //        sample = juce::Decibels::decibelsToGain(sampleDb);
+
+    //        auto newLimit = juce::Decibels::decibelsToGain(-24);
+    //        auto inverse = 1 / newLimit;
+    //        auto resizeSamples = sample * inverse;
+    //        resizeSamples > 1 ? resizeSamples = 1 : resizeSamples = resizeSamples;
+    //        resizeSamples < -1 ? resizeSamples = -1 : resizeSamples = resizeSamples;
+    //        auto cubic = (resizeSamples - pow(resizeSamples, 3) / 3);
+    //        sample = cubic * newLimit;
+
+    //        data[s] = sample;
+    //    }
+    //}
+
+    for (int ch = 0; ch < totalNumInputChannels; ch++)
     {
-        float leftSample = leftChannel[i];
-        float rightSample = rightChannel[i];
+        auto* data = block.getChannelPointer(ch);
+        auto rmsGain = buffer.getRMSLevel(ch, 0, buffer.getNumSamples());
+        auto rms = juce::Decibels::gainToDecibels(rmsGain, -72.f);
+        auto freqAdjusted = juce::jmap(grabGain + rms, -72.f, 24.f, -100.f, 100.f);
 
-        /*auto nextValue = balistic.processSample(0, leftSample);
-        auto gainValue = gain.processSample(nextValue);
-        auto compressed = compressor.processSample(0, gainValue);*/
-
-        //auto gainIndb = juce::Decibels::gainToDecibels(leftSample, -60.f);
-
-        auto freqAdjusted = juce::jmap(afGain->get() + rms, -60.f, 24.f, 0.f, 200.f);
-
-        nextCutoff = grabCutoff + (std::floorf(freqAdjusted) * modAmount->get());
-        if (nextCutoff < 1) { nextCutoff = 1; }
-
-        auto filterCoe = juce::dsp::IIR::Coefficients<float>::makeAllPass(getSampleRate(), nextCutoff);
-
-        //leftSample, rightSample = compressed;
-
-        for (int filter = 0; filter < allpasses.size()/*JUCE_LIVE_CONSTANT(2)*/; filter += 2)
+        for (int s = 0; s < buffer.getNumSamples(); s++)
         {
-            allpasses[filter].coefficients = filterCoe;
-            allpasses[filter + 1].coefficients = filterCoe;
-            leftSample = allpasses[filter].processSample(leftSample);
-            rightSample = allpasses[filter + 1].processSample(rightSample);
+            float sample = data[s];
+
+            nextCutoff = grabCutoff + (std::floorf(freqAdjusted) * modAmount->get());
+
+            for (int filter = 0; filter < allpasses.size()/*JUCE_LIVE_CONSTANT(2)*/; filter++)
+            {
+                if(s % 100 == 0)
+                    allpasses[filter].setCutoffFrequency(nextCutoff);
+                sample = allpasses[filter].processSample(ch, sample);
+            }
+
+            /*auto sampleDb = juce::Decibels::gainToDecibels(sample) + grabGain;
+
+            sample = juce::Decibels::decibelsToGain(sampleDb);
+
+            auto newLimit = juce::Decibels::decibelsToGain(-24);
+            auto inverse = 1 / newLimit;
+            auto resizeSamples = sample * inverse;
+            resizeSamples > 1 ? resizeSamples = 1 : resizeSamples = resizeSamples;
+            resizeSamples < -1 ? resizeSamples = -1 : resizeSamples = resizeSamples;
+            auto cubic = (resizeSamples - pow(resizeSamples, 3) / 3);
+            sample = cubic * newLimit;*/
+
+            data[s] = sample;
+
         }
-        
-        //auto totalGain = juce::Decibels::decibelsToGain(userAddition, -60.f);
-
-        leftChannel[i] = leftSample ;
-        rightChannel[i] = rightSample;
     }
-
     //Boost the actual signal by the imput amount
     //somehow keep the distortion
 
