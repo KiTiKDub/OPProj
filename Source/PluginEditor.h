@@ -30,7 +30,8 @@ private:
     // access the processor object that created it.
     OddProphProjAudioProcessor& audioProcessor;
 
-    juce::Slider cutoffFreq, afGain, modAmount, attack, release;
+    juce::Slider cutoffFreq, afGain, modAmount, cutoffLFO, modLFO;
+    juce::Slider cutoffDepth, modDepth;
 
     juce::AudioProcessorValueTreeState::SliderAttachment cutoffFreqAT, afGainAT, modAmountAT, attackAT, releaseAT;
 

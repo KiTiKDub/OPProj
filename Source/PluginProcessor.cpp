@@ -25,8 +25,8 @@ OddProphProjAudioProcessor::OddProphProjAudioProcessor()
     cutoffFreq = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter("cutoffFreq"));
     afGain = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter("afGain"));
     modAmount = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter("modAmount"));
-    attack = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter("attack"));
-    release = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter("release"));
+    cutoffLFO = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter("cutoffLFO"));
+    modLFO = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter("modLFO"));
 
 }
 
@@ -113,6 +113,10 @@ void OddProphProjAudioProcessor::prepareToPlay (double sampleRate, int samplesPe
 
     balistic.prepare(spec);
     balistic.setLevelCalculationType(juce::dsp::BallisticsFilterLevelCalculationType::RMS);
+
+    fixDCOffset.prepare(spec);
+    fixDCOffset.setType(juce::dsp::FirstOrderTPTFilterType::highpass);
+    fixDCOffset.setCutoffFrequency(5);
 }
 
 void OddProphProjAudioProcessor::releaseResources()
@@ -156,48 +160,83 @@ void OddProphProjAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     for (auto i = totalNumInputChannels; i < totalNumOutputChannels; ++i)
         buffer.clear (i, 0, buffer.getNumSamples());
 
-    /*
-    //create lfo value in polar domain
-    auto currentLfoValue = lfoRate->get() * buffer.getNumSamples() / getSampleRate() * juce::MathConstants<float>::twoPi;
+    
+    //create lfo value in polar domain, this goes up to a rate of 50
+    auto currentLfoValue = (cutoffLFO->get() * 50) * buffer.getNumSamples() / getSampleRate() * juce::MathConstants<float>::twoPi;
+    auto modLFOValue = (modLFO->get() * 50) * buffer.getNumSamples() / getSampleRate() * juce::MathConstants<float>::twoPi;
 
     //create sine wave values
-    _lfoValue += currentLfoValue;
-    if (_lfoValue > juce::MathConstants<float>::pi) { _lfoValue -= juce::MathConstants<float>::twoPi; }
+    _lfoCutoff += currentLfoValue;
+    if (_lfoCutoff > juce::MathConstants<float>::pi) { _lfoCutoff -= juce::MathConstants<float>::twoPi; }
+    _lfoMod += modLFOValue;
+    if (_lfoMod > juce::MathConstants<float>::pi) { _lfoMod -= juce::MathConstants<float>::twoPi; }
 
-    //convert to be between -1 * 1
-    auto sineValue = std::sin(_lfoValue);
-
-    //update based on much the user want to ossiclate
-    auto cutoffMod = lfoDepth->get() * sineValue;
-    */
-
-    //auto leftBlock = block.getSingleChannelBlock(0);
-    //auto rightBlock = block.getSingleChannelBlock(1);
-    //auto leftContext = juce::dsp::ProcessContextReplacing<float>(leftBlock);
-    //auto rightContext = juce::dsp::ProcessContextReplacing<float>(rightBlock);
-
-    ////get rmsValue
-    //rmsValue = 0;
-
-    //for (int i = 0; i < totalNumInputChannels; i++)
-    //{
-    //    auto check = buffer.getRMSLevel(i, 0, buffer.getNumSamples());
-    //    rmsValue += juce::Decibels::gainToDecibels(buffer.getRMSLevel(i, 0, buffer.getNumSamples()));
-    //}
-
-    //if (rmsValue < -120) { rmsValue = -120; }
-
-    ////Modulation total
-    //auto afTotal = rmsValue/totalNumInputChannels + afGain->get();
+    //convert to be between -1 * 1, add depth
+    auto sineValueCutoff = std::sin(_lfoCutoff);
+    auto cuttoffChange = sineValueCutoff * cutoffLFO->get();
+    auto sineValueCutoffMod = std::sin(_lfoMod);
+    auto modChange = sineValueCutoffMod * modLFO->get();
 
     auto block = juce::dsp::AudioBlock<float>(buffer);
+    auto context = juce::dsp::ProcessContextReplacing<float>(block);
 
     //process attack and release times
-    balistic.setAttackTime(attack->get());
-    balistic.setReleaseTime(release->get());
+    balistic.setAttackTime(10);
+    balistic.setReleaseTime(100);
 
     auto grabCutoff = cutoffFreq->get();
     auto grabGain = afGain->get();
+    auto grabMod = modAmount->get();
+
+    float newRms = 0;
+
+    for (int ch = 0; ch < totalNumInputChannels; ch++)
+    {
+        newRms += buffer.getRMSLevel(ch, 0, buffer.getNumSamples());
+    }
+
+    newRms /= 2;
+    newRms = juce::Decibels::gainToDecibels(newRms, -72.f);
+
+    auto followerDB = newRms + grabGain;
+
+    auto modulatedCuttoff = std::fmin(std::fmax(grabCutoff + (cuttoffChange * 1000), 20), 2000);
+    auto modulatedMod = std::fmin(std::fmax(grabMod + (modChange * .5), 0), 1);
+
+    //DBG("Mod Cutoff: " << modulatedMod);
+
+    for (int ch = 0; ch < totalNumInputChannels; ch++)
+    {
+        auto* data = block.getChannelPointer(ch);
+
+        for (int s = 0; s < buffer.getNumSamples(); s++)
+        {
+            float sample = data[s];
+
+            auto nextFollowerValue = balistic.processSample(ch, juce::Decibels::decibelsToGain(followerDB, -72.f));
+
+            auto freqAdjusted = juce::jmap(nextFollowerValue, 0.f, 1.f, 0.f, 1000.f);
+
+            nextCutoff = modulatedCuttoff + (std::floorf(freqAdjusted) * modulatedMod);
+
+            for (int filter = 0; filter < allpasses.size()/*JUCE_LIVE_CONSTANT(2)*/; filter++)
+            {
+                if(s % 100 == 0)
+                    allpasses[filter].setCutoffFrequency(nextCutoff);
+                sample = allpasses[filter].processSample(ch, sample);
+            }
+
+            auto power = pow(sample, 2) / abs(sample) * 1.25f;
+            auto distort = (sample / abs(sample)) * (1 - std::exp(-power));
+
+            data[s] = distort;
+        }
+    }
+
+    fixDCOffset.process(context);
+
+
+    //=====================================================ALT VERSION==================================================
 
     //for (int ch = 0; ch < totalNumInputChannels; ch++)
     //{
@@ -234,86 +273,6 @@ void OddProphProjAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     //        data[s] = sample;
     //    }
     //}
-
-    float newRms = 0;
-
-    for (int ch = 0; ch < totalNumInputChannels; ch++)
-    {
-        newRms += buffer.getRMSLevel(ch, 0, buffer.getNumSamples());
-    }
-
-    newRms /= 2;
-    newRms = juce::Decibels::gainToDecibels(newRms, -72.f);
-
-    auto followerDB = newRms + grabGain;
-
-    for (int ch = 0; ch < totalNumInputChannels; ch++)
-    {
-        auto* data = block.getChannelPointer(ch);
-        //auto rmsGain = buffer.getRMSLevel(ch, 0, buffer.getNumSamples());
-        //auto rms = juce::Decibels::gainToDecibels(rmsGain, -72.f);
-
-        for (int s = 0; s < buffer.getNumSamples(); s++)
-        {
-            float sample = data[s];
-
-            auto nextFollowerValue = balistic.processSample(ch, juce::Decibels::decibelsToGain(followerDB, -72.f));
-
-            auto freqAdjusted = juce::jmap(nextFollowerValue, 0.f, 1.f, 0.f, 1000.f);
-
-            nextCutoff = grabCutoff + (std::floorf(freqAdjusted) * modAmount->get());
-
-            for (int filter = 0; filter < allpasses.size()/*JUCE_LIVE_CONSTANT(2)*/; filter++)
-            {
-                if(s % 100 == 0)
-                    allpasses[filter].setCutoffFrequency(nextCutoff);
-                sample = allpasses[filter].processSample(ch, sample);
-            }
-
-            /*auto sampleDb = juce::Decibels::gainToDecibels(sample) + grabGain;
-
-            sample = juce::Decibels::decibelsToGain(sampleDb);
-
-            auto newLimit = juce::Decibels::decibelsToGain(-24);
-            auto inverse = 1 / newLimit;
-            auto resizeSamples = sample * inverse;
-            resizeSamples > 1 ? resizeSamples = 1 : resizeSamples = resizeSamples;
-            resizeSamples < -1 ? resizeSamples = -1 : resizeSamples = resizeSamples;
-            auto cubic = (resizeSamples - pow(resizeSamples, 3) / 3);
-            sample = cubic * newLimit;*/
-
-            data[s] = sample;
-
-        }
-    }
-    //Boost the actual signal by the imput amount
-    //somehow keep the distortion
-
-    ////DBG("cutoff Mod " << nextValue);
-
-    ////lets say maximum this can go up is 200 hz swing
-    //auto freqAdjusted = juce::jmap(nextValue, -24.f, 30.f, 0.f, 200.f);
-
-    ////context for all passes, need to seperate left and right channels
-    //
-
-    ////DBG("Freq Adjusted " << freqAdjusted);
-
-    ////get new cutoff after modulation, make sure this does not go below zero
-    //auto nextCutoff = cutoffFreq->get() + freqAdjusted;
-    //if (nextCutoff < 1) { nextCutoff = 1; }
-
-    ////update all passes
-    //auto filterCoe = juce::dsp::IIR::Coefficients<float>::makeAllPass(getSampleRate(), nextCutoff);
-
-    ////process all passes
-    //for(int filter = 0; filter < allpasses.size(); filter += 2)
-    //{
-    //    allpasses[filter].coefficients = filterCoe;
-    //    allpasses[filter + 1].coefficients = filterCoe;
-    //    allpasses[filter].process(leftContext);
-    //    allpasses[filter + 1].process(rightContext);
-    //}
  
 }
 
@@ -349,16 +308,17 @@ juce::AudioProcessorValueTreeState::ParameterLayout OddProphProjAudioProcessor::
     
     AudioProcessorValueTreeState::ParameterLayout layout;
 
-    auto cuttoff = NormalisableRange<float>(20, 2000, 1, 1); //update skew
+    auto cuttoff = NormalisableRange<float>(20, 2000, 1, .5); //update skew
     auto gain = NormalisableRange<float>(0, 24, .01, 1);
-    auto adsr = NormalisableRange<float>(0, 5000, 1, 1); //update skew
+    //auto adsr = NormalisableRange<float>(0, 5000, 1, 1); //update skew
+    auto rate = NormalisableRange<float>(.1, 100, .1, .4);
     auto zeroToOne = NormalisableRange<float>(0, 1, .01);
 
     layout.add(std::make_unique<AudioParameterFloat>("cutoffFreq", "Cuttoff Freq", cuttoff, 200));
     layout.add(std::make_unique<AudioParameterFloat>("afGain", "Gain", gain, 0));
     layout.add(std::make_unique<AudioParameterFloat>("modAmount", "Mod Amount", zeroToOne, 1));
-    layout.add(std::make_unique<AudioParameterFloat>("attack", "Attack", adsr, 10));
-    layout.add(std::make_unique<AudioParameterFloat>("release", "release", adsr, 100));
+    layout.add(std::make_unique<AudioParameterFloat>("cutoffLFO", "cutoffLFO", zeroToOne, 0));
+    layout.add(std::make_unique<AudioParameterFloat>("modLFO", "modLFO", zeroToOne, 0));
 
     return layout;
 }

@@ -61,15 +61,18 @@ private:
 
     //std::array<juce::dsp::IIR::Filter<float>, 64> allpasses;
     std::array<juce::dsp::FirstOrderTPTFilter<float>, 64> allpasses;
+    juce::dsp::FirstOrderTPTFilter<float> fixDCOffset;
 
     juce::dsp::BallisticsFilter<float> balistic;
 
     juce::AudioParameterFloat* cutoffFreq{ nullptr };
     juce::AudioParameterFloat* afGain{ nullptr };
     juce::AudioParameterFloat* modAmount{ nullptr };
-    juce::AudioParameterFloat* attack{ nullptr };
-    juce::AudioParameterFloat* release{ nullptr };
+    juce::AudioParameterFloat* cutoffLFO{ nullptr };
+    juce::AudioParameterFloat* modLFO{ nullptr };
 
+    float _lfoCutoff{ 0 };
+    float _lfoMod{ 0 };
 
     //Need to add modulation into scheme
     //Test to see if it does dope things
